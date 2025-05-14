@@ -2,9 +2,9 @@
 #include <stdint.h>
 
 //battery measure
-uint8_t batteryCap(void);
+float batteryCap(void);
 //latch open
-void buzzer(uint8_t time);
+void buzzer(uint16_t time);
 //sensor measure
 float distanceCm(void);
 

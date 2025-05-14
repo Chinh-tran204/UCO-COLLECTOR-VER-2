@@ -24,6 +24,13 @@
 #include "i2c-lcd.h"
 #include "SIMCom.h"
 #include "device.h"
+#include "stm32_hal_legacy.h"
+#include "stm32f103xb.h"
+#include "stm32f1xx_hal.h"
+#include "stm32f1xx_hal_gpio.h"
+#include "stm32f1xx_hal_pwr.h"
+#include "stm32f1xx_hal_rtc.h"
+#include <stdint.h>
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -32,14 +39,16 @@
 // buzzer: PB0 OUT            Done
 // mainPower1: PB3 OUT        
 // mainPower2: PB4 OUT        
-// button: PB2 IN             
+// button: PB2 & PA0 IN             
 // latch: PB1 OUT             Done
 // battery: PA1 IN            
 /* USER CODE END PTD */
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-
+#define MAIN_POWER_1 3
+#define MAIN_POWER_2 4
+#define WAKE_UP 2
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -59,7 +68,6 @@ TIM_HandleTypeDef htim1;
 UART_HandleTypeDef huart1;
 
 /* USER CODE BEGIN PV */
-
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -71,15 +79,17 @@ static void MX_ADC1_Init(void);
 static void MX_RTC_Init(void);
 static void MX_TIM1_Init(void);
 /* USER CODE BEGIN PFP */
+static uint8_t unlockAuth = 2;
+static uint8_t machineOpened = 0;
+static char displayData[20];
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+//delay ms input mili-second
 void delay_ms(uint32_t delayTime){
   uint32_t startTime = HAL_GetTick();
-  uint32_t currentTime = HAL_GetTick();
-  while(currentTime - startTime <= delayTime){
-    currentTime = HAL_GetTick();
+  while(HAL_GetTick() - startTime <= delayTime){
   }
 }
 //str len measuring
@@ -87,6 +97,145 @@ size_t strlen(const char *s){
   const char *p = s;
   while (*p) ++p;
   return (size_t)(p - s);
+}
+
+void script_1(void){
+  //scanning for the input from user end
+  //turn on power for both
+  HAL_GPIO_WritePin(GPIOB, MAIN_POWER_1, 1);
+  HAL_GPIO_WritePin(GPIOB, MAIN_POWER_2, 1);
+  //turn on the unlock IRQ on the PD0 pin for interrupt unlock
+  unlockAuth = 1;
+  //take in the sensor info and turn on lcd for display
+  float volume = distanceCm();
+  float weight = volume*0.9;
+  //init lcd and displace the number
+  HAL_Delay(500);
+  lcd_init();
+  lcd_goto_XY(5, 0);
+  lcd_send_string("ECO OIL");
+  HAL_Delay(50);
+  sprintf(displayData,"TT:{%.1f}L-{%.1f}KG",volume,weight);
+  lcd_goto_XY(2, 1);
+  lcd_send_string(displayData);
+  HAL_Delay(500);
+  delay_ms(8000);
+  //turn off lcd power to save power
+  HAL_GPIO_WritePin(GPIOB, MAIN_POWER_1, 0);
+  //disable the IRQ for unlocking and assign it to the IRQ function to run the lcd and the sensor again
+  unlockAuth = 0;   //allow for unlock authorization for unaware trigger, DELETE IF DON'T NEED
+}
+
+//unlocking function, only triggered by the unlock IRQ sequenced
+void unlocking(void){
+  //scan to see if user still press the button
+  HAL_GPIO_WritePin(GPIOB, MAIN_POWER_1, 1);
+  HAL_GPIO_WritePin(GPIOB, MAIN_POWER_2, 1);
+  lcd_init();
+  lcd_clear_display();
+  //button stuck scanning
+  //end of button stuck handle 
+  HAL_Delay(50);
+  buzzer(500);
+  lcd_send_string("HOLD FOR UNLOCK!");
+  //scan for button pressing period
+  uint16_t startTime = HAL_GetTick();
+  while (!HAL_GPIO_ReadPin(GPIOB, 2) && (HAL_GetTick() - startTime <=4000)){
+    //3 second of holding the button for unlocking the device
+    if(HAL_GetTick() - startTime >= 3000){
+      //unlocking sequence
+      lcd_clear_display();
+      HAL_Delay(50);
+      lcd_send_string("WAITING FOR UNLOCK");
+      lcd_goto_XY(0, 1);
+      lcd_send_string("STOP PRESSING");
+      buzzer(500);
+      //turn on SIMCom power 
+      HAL_GPIO_WritePin(GPIOB, MAIN_POWER_2, 1);
+      for (uint8_t i; i < 5; i++) {
+        HAL_Delay(1);
+        buzzer(300);
+      }
+      uint8_t conf = SIMCom_Get();    //start HTTP GET
+      switch (conf) {
+        case 0:   //http success
+          lcd_clear_display();
+          lcd_send_string("UNLOCKING...");
+          //turn off the SIMCom
+          HAL_GPIO_WritePin(GPIOB, MAIN_POWER_2, 0);
+          HAL_Delay(50);
+          buzzer(300);
+          HAL_Delay(300);
+          buzzer(300);
+          latchOpen();
+          machineOpened = 1;
+          lcd_clear_display();
+          break;
+        case 1:   //HANDSHAKE Fail
+          lcd_clear_display();
+          lcd_send_string("HAND SHAKE FAIL!");
+          HAL_Delay(300);
+          buzzer(300);
+          HAL_Delay(300);
+          buzzer(300);
+          HAL_Delay(300);
+          buzzer(300);
+          break;
+        case 5:   //server not available or not auth for unlock yet
+          lcd_clear_display();
+          lcd_send_string("SERVER NOT AUTH!");
+          HAL_Delay(300);
+          buzzer(300);
+          HAL_Delay(300);
+          buzzer(300);
+          HAL_Delay(300);
+          buzzer(300);
+          break;
+        case 3:   //attempting http fail
+          lcd_clear_display();
+          lcd_send_string("ATTEMPTING HTTP FAIL!");
+          HAL_Delay(300);
+          buzzer(300);
+          HAL_Delay(300);
+          buzzer(300);
+          HAL_Delay(300);
+          buzzer(300);
+          break;
+        case 4:   //AT Command Fail
+          lcd_clear_display();
+          lcd_send_string("AT COMMAND FAIL!");
+          HAL_Delay(300);
+          buzzer(300);
+          HAL_Delay(300);
+          buzzer(300);
+          HAL_Delay(300);
+          buzzer(300);
+          break;
+      }
+    }
+  }
+}
+
+//IRQ Handle
+void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin){
+  //scan for EXTI input pins
+  //Lower priority 1
+  if(GPIO_Pin == GPIO_PIN_7){
+    //script1 interrupt
+    delay_ms(50);   //debounce for 50ms for multiple pressing
+    if(!HAL_GPIO_ReadPin(GPIOA, 7)&&(unlockAuth == 0)){
+      unlockAuth = 2;
+      script_1();
+    }
+  }
+  //GPIO_PIN_0 Have higher priority 0
+  if(GPIO_Pin ==  GPIO_PIN_2){}
+    //unlocking interupt
+    delay_ms(50);   //debounce for 50ms for mutiple pressing
+    if(!HAL_GPIO_ReadPin(GPIOB, 2)&&(unlockAuth == 1)){
+      unlockAuth = 2;
+      unlocking();
+    }
 }
 /* USER CODE END 0 */
 
@@ -98,7 +247,6 @@ int main(void)
 {
 
   /* USER CODE BEGIN 1 */
-
   /* USER CODE END 1 */
 
   /* MCU Configuration--------------------------------------------------------*/
@@ -107,7 +255,6 @@ int main(void)
   HAL_Init();
 
   /* USER CODE BEGIN Init */
-
   /* USER CODE END Init */
 
   /* Configure the system clock */
@@ -124,7 +271,21 @@ int main(void)
   MX_RTC_Init();
   MX_TIM1_Init();
   /* USER CODE BEGIN 2 */
-
+  //turn of the two power fr begin, do not init before the HAL_Init()
+  HAL_GPIO_WritePin(GPIOB, MAIN_POWER_1, 0);
+  HAL_GPIO_WritePin(GPIOB, MAIN_POWER_2, 0);
+  //running script 1
+  script_1();
+  //running SIMCom function post if only the device is not open - machineOpened = 0
+  if(!machineOpened){
+    buzzer(300);
+    delay_ms(4000);
+    uint8_t conf = SIMCom_post(distanceCm(), batteryCap());
+    if (conf) buzzer(500);
+  }
+  //turn off all the power
+  HAL_GPIO_WritePin(GPIOB, MAIN_POWER_1, 0);
+  HAL_GPIO_WritePin(GPIOB, MAIN_POWER_2, 0);
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -135,6 +296,22 @@ int main(void)
 
     /* USER CODE BEGIN 3 */
   }
+  //setting alarm before going to sleep
+  RTC_TimeTypeDef time = {0U, 0U, 0U};
+  HAL_RTC_GetTime(&hrtc, &time, RTC_FORMAT_BIN);
+  if (time.Hours >= 12 ){
+    time.Hours = 0;
+    time.Minutes = 0;
+    time.Seconds = 0;
+    HAL_RTC_SetTime(&hrtc, &time, RTC_FORMAT_BIN);    //set the initial time for the clock
+    RTC_AlarmTypeDef alarm = {{12U, 0U, 0U}, RTC_ALARM_A};    //Half a day alarm
+    HAL_RTC_SetAlarm(&hrtc, &alarm, RTC_FORMAT_BIN);
+  }
+
+  //enable wake up pin and then go to sleep
+  __HAL_PWR_CLEAR_FLAG(PWR_FLAG_WU);                      //clear the wakeUp flag, allow for multiple wake up enable
+  HAL_PWR_EnableWakeUpPin(PWR_WAKEUP_PIN1);   //Enable the wakeUp pin input - high signal
+  HAL_PWR_EnterSTANDBYMode();                             //enter the stanby mode
   /* USER CODE END 3 */
 }
 
@@ -151,11 +328,14 @@ void SystemClock_Config(void)
   /** Initializes the RCC Oscillators according to the specified parameters
   * in the RCC_OscInitTypeDef structure.
   */
-  RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSI|RCC_OSCILLATORTYPE_LSI;
+  RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSE|RCC_OSCILLATORTYPE_LSE;
+  RCC_OscInitStruct.HSEState = RCC_HSE_ON;
+  RCC_OscInitStruct.HSEPredivValue = RCC_HSE_PREDIV_DIV1;
+  RCC_OscInitStruct.LSEState = RCC_LSE_ON;
   RCC_OscInitStruct.HSIState = RCC_HSI_ON;
-  RCC_OscInitStruct.HSICalibrationValue = RCC_HSICALIBRATION_DEFAULT;
-  RCC_OscInitStruct.LSIState = RCC_LSI_ON;
-  RCC_OscInitStruct.PLL.PLLState = RCC_PLL_NONE;
+  RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
+  RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSE;
+  RCC_OscInitStruct.PLL.PLLMUL = RCC_PLL_MUL9;
   if (HAL_RCC_OscConfig(&RCC_OscInitStruct) != HAL_OK)
   {
     Error_Handler();
@@ -165,18 +345,18 @@ void SystemClock_Config(void)
   */
   RCC_ClkInitStruct.ClockType = RCC_CLOCKTYPE_HCLK|RCC_CLOCKTYPE_SYSCLK
                               |RCC_CLOCKTYPE_PCLK1|RCC_CLOCKTYPE_PCLK2;
-  RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_HSI;
+  RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
   RCC_ClkInitStruct.AHBCLKDivider = RCC_SYSCLK_DIV1;
-  RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV1;
+  RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV2;
   RCC_ClkInitStruct.APB2CLKDivider = RCC_HCLK_DIV1;
 
-  if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_0) != HAL_OK)
+  if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_2) != HAL_OK)
   {
     Error_Handler();
   }
   PeriphClkInit.PeriphClockSelection = RCC_PERIPHCLK_RTC|RCC_PERIPHCLK_ADC;
-  PeriphClkInit.RTCClockSelection = RCC_RTCCLKSOURCE_LSI;
-  PeriphClkInit.AdcClockSelection = RCC_ADCPCLK2_DIV2;
+  PeriphClkInit.RTCClockSelection = RCC_RTCCLKSOURCE_LSE;
+  PeriphClkInit.AdcClockSelection = RCC_ADCPCLK2_DIV6;
   if (HAL_RCCEx_PeriphCLKConfig(&PeriphClkInit) != HAL_OK)
   {
     Error_Handler();
@@ -219,7 +399,7 @@ static void MX_ADC1_Init(void)
   */
   sConfig.Channel = ADC_CHANNEL_1;
   sConfig.Rank = ADC_REGULAR_RANK_1;
-  sConfig.SamplingTime = ADC_SAMPLETIME_239CYCLES_5;
+  sConfig.SamplingTime = ADC_SAMPLETIME_28CYCLES_5;
   if (HAL_ADC_ConfigChannel(&hadc1, &sConfig) != HAL_OK)
   {
     Error_Handler();
@@ -276,6 +456,9 @@ static void MX_RTC_Init(void)
 
   /* USER CODE END RTC_Init 0 */
 
+  RTC_TimeTypeDef sTime = {0};
+  RTC_DateTypeDef DateToUpdate = {0};
+
   /* USER CODE BEGIN RTC_Init 1 */
 
   /* USER CODE END RTC_Init 1 */
@@ -286,6 +469,30 @@ static void MX_RTC_Init(void)
   hrtc.Init.AsynchPrediv = RTC_AUTO_1_SECOND;
   hrtc.Init.OutPut = RTC_OUTPUTSOURCE_ALARM;
   if (HAL_RTC_Init(&hrtc) != HAL_OK)
+  {
+    Error_Handler();
+  }
+
+  /* USER CODE BEGIN Check_RTC_BKUP */
+
+  /* USER CODE END Check_RTC_BKUP */
+
+  /** Initialize RTC and set the Time and Date
+  */
+  sTime.Hours = 0x13;
+  sTime.Minutes = 0x0;
+  sTime.Seconds = 0x0;
+
+  if (HAL_RTC_SetTime(&hrtc, &sTime, RTC_FORMAT_BCD) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  DateToUpdate.WeekDay = RTC_WEEKDAY_MONDAY;
+  DateToUpdate.Month = RTC_MONTH_JANUARY;
+  DateToUpdate.Date = 0x1;
+  DateToUpdate.Year = 0x0;
+
+  if (HAL_RTC_SetDate(&hrtc, &DateToUpdate, RTC_FORMAT_BCD) != HAL_OK)
   {
     Error_Handler();
   }
@@ -314,7 +521,7 @@ static void MX_TIM1_Init(void)
 
   /* USER CODE END TIM1_Init 1 */
   htim1.Instance = TIM1;
-  htim1.Init.Prescaler = 72;
+  htim1.Init.Prescaler = 71;
   htim1.Init.CounterMode = TIM_COUNTERMODE_UP;
   htim1.Init.Period = 65535;
   htim1.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
@@ -396,23 +603,24 @@ static void MX_GPIO_Init(void)
   HAL_GPIO_WritePin(GPIOB, GPIO_PIN_0|GPIO_PIN_1|GPIO_PIN_3|GPIO_PIN_4
                           |GPIO_PIN_9, GPIO_PIN_RESET);
 
-  /*Configure GPIO pins : PC13 PC14 PC15 */
-  GPIO_InitStruct.Pin = GPIO_PIN_13|GPIO_PIN_14|GPIO_PIN_15;
+  /*Configure GPIO pin : PC13 */
+  GPIO_InitStruct.Pin = GPIO_PIN_13;
   GPIO_InitStruct.Mode = GPIO_MODE_ANALOG;
   HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
 
-  /*Configure GPIO pins : PD0 PD1 */
-  GPIO_InitStruct.Pin = GPIO_PIN_0|GPIO_PIN_1;
-  GPIO_InitStruct.Mode = GPIO_MODE_ANALOG;
-  HAL_GPIO_Init(GPIOD, &GPIO_InitStruct);
-
   /*Configure GPIO pins : PA2 PA3 PA4 PA5
-                           PA6 PA7 PA8 PA11
-                           PA12 PA15 */
+                           PA6 PA8 PA11 PA12
+                           PA15 */
   GPIO_InitStruct.Pin = GPIO_PIN_2|GPIO_PIN_3|GPIO_PIN_4|GPIO_PIN_5
-                          |GPIO_PIN_6|GPIO_PIN_7|GPIO_PIN_8|GPIO_PIN_11
-                          |GPIO_PIN_12|GPIO_PIN_15;
+                          |GPIO_PIN_6|GPIO_PIN_8|GPIO_PIN_11|GPIO_PIN_12
+                          |GPIO_PIN_15;
   GPIO_InitStruct.Mode = GPIO_MODE_ANALOG;
+  HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
+
+  /*Configure GPIO pin : PA7 */
+  GPIO_InitStruct.Pin = GPIO_PIN_7;
+  GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
   /*Configure GPIO pins : PB0 PB1 PB3 PB4
@@ -424,9 +632,9 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
 
-  /*Configure GPIO pins : PB2 PB8 */
-  GPIO_InitStruct.Pin = GPIO_PIN_2|GPIO_PIN_8;
-  GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
+  /*Configure GPIO pin : PB2 */
+  GPIO_InitStruct.Pin = GPIO_PIN_2;
+  GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
 
@@ -437,11 +645,22 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Mode = GPIO_MODE_ANALOG;
   HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
 
-  /*Configure peripheral I/O remapping */
-  __HAL_AFIO_REMAP_PD01_ENABLE();
+  /*Configure GPIO pin : PB8 */
+  GPIO_InitStruct.Pin = GPIO_PIN_8;
+  GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
+
+  /* EXTI interrupt init*/
+  HAL_NVIC_SetPriority(EXTI2_IRQn, 1, 0);
+  HAL_NVIC_EnableIRQ(EXTI2_IRQn);
+
+  HAL_NVIC_SetPriority(EXTI9_5_IRQn, 2, 0);
+  HAL_NVIC_EnableIRQ(EXTI9_5_IRQn);
 
   /* USER CODE BEGIN MX_GPIO_Init_2 */
-
+  NVIC_SetPriority(RTC_IRQn, 0);
+  NVIC_EnableIRQ(RTC_IRQn);
   /* USER CODE END MX_GPIO_Init_2 */
 }
 

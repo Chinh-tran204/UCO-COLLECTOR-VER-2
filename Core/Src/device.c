@@ -1,6 +1,8 @@
 #include "device.h"
 #include "stm32f103xb.h"
 #include "stm32f1xx_hal.h"
+#include "stm32f1xx_hal_adc.h"
+#include "stm32f1xx_hal_adc_ex.h"
 #include "stm32f1xx_hal_gpio.h"
 #include "stm32f1xx_hal_tim.h"
 #include "system_stm32f1xx.h"
@@ -17,14 +19,13 @@
 
 //Hardware timer init - from main
 extern TIM_HandleTypeDef htim1;
+extern ADC_HandleTypeDef hadc1;
+
 
 //delay mili-second
 void delay_ms(uint32_t delayTime){
     uint32_t startTime = HAL_GetTick();
-    uint32_t currentTime = HAL_GetTick();
-    while(currentTime - startTime <= delayTime){
-    currentTime = HAL_GetTick();
-    }
+    while(HAL_GetTick() - startTime <= delayTime){}
 }
 //delay micro second
 void delay_us(uint16_t time){
@@ -34,8 +35,15 @@ void delay_us(uint16_t time){
     HAL_TIM_Base_Stop(&htim1);
 }
 
-uint8_t batteryCap(void){
-    //do some thing
+float batteryCap(void){
+    uint32_t ADC_level;
+    HAL_ADCEx_Calibration_Start(&hadc1);
+    //start the ADC and taking in data
+    HAL_ADC_Start(&hadc1);
+    HAL_ADC_PollForConversion(&hadc1, 200);
+    ADC_level = HAL_ADC_GetValue(&hadc1);
+    float voltage = ((float)ADC_level/4095.0)*3.3;
+    return voltage;
 }
 //latch open function
 void latchOpen(void){
@@ -44,7 +52,7 @@ void latchOpen(void){
     HAL_GPIO_WritePin(GPIOB, LATCH, 0);
 }
 //buzzer function 
-void buzzer(uint8_t time){
+void buzzer(uint16_t time){
     HAL_GPIO_WritePin(GPIOB, BUZZER, 1);
     delay_ms(time);     //time rign base one user
     HAL_GPIO_WritePin(GPIOB, BUZZER, 0);
