@@ -21,34 +21,28 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-#include "i2c-lcd.h"
-#include "SIMCom.h"
-#include "device.h"
-#include "stm32_hal_legacy.h"
 #include "stm32f103xb.h"
 #include "stm32f1xx_hal.h"
+#include "stm32f1xx_hal_cortex.h"
 #include "stm32f1xx_hal_gpio.h"
-#include "stm32f1xx_hal_pwr.h"
-#include "stm32f1xx_hal_rtc.h"
 #include <stdint.h>
+#include "i2c-lcd.h"
+#include "device.h"
+#include "stm32f1xx_hal_rtc.h"
+#include "stm32f1xx_hal_tim.h"
+#include "SIMCom.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
 /* USER CODE BEGIN PTD */
-// sensor: PB8 IN; PB9 OUT    Done
-// buzzer: PB0 OUT            Done
-// mainPower1: PB3 OUT        
-// mainPower2: PB4 OUT        
-// button: PB2 & PA0 IN             
-// latch: PB1 OUT             Done
-// battery: PA1 IN            
+
 /* USER CODE END PTD */
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-#define MAIN_POWER_1 3
-#define MAIN_POWER_2 4
-#define WAKE_UP 2
+#define MAIN_POWER_1 GPIO_PIN_5
+#define MAIN_POWER_2 GPIO_PIN_4
+#define BUTTON_INPUT  GPIO_PIN_0
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -64,179 +58,36 @@ I2C_HandleTypeDef hi2c1;
 RTC_HandleTypeDef hrtc;
 
 TIM_HandleTypeDef htim1;
+TIM_HandleTypeDef htim2;
 
 UART_HandleTypeDef huart1;
 
 /* USER CODE BEGIN PV */
+uint8_t SIM_FLAG = 0U;
+static uint8_t SCRIPT_FLAG = 0U;
+static uint8_t UNLOCK = 0U;
+static char displayData[20];
+static uint8_t UNLOCK_AUTHORIZE = 0;
+static uint8_t count = 0;
+static float volume;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
-static void MX_USART1_UART_Init(void);
-static void MX_I2C1_Init(void);
 static void MX_ADC1_Init(void);
+static void MX_I2C1_Init(void);
 static void MX_RTC_Init(void);
 static void MX_TIM1_Init(void);
+static void MX_TIM2_Init(void);
+static void MX_USART1_UART_Init(void);
 /* USER CODE BEGIN PFP */
-static uint8_t unlockAuth = 2;
-static uint8_t machineOpened = 0;
-static char displayData[20];
+
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
-//delay ms input mili-second
-void delay_ms(uint32_t delayTime){
-  uint32_t startTime = HAL_GetTick();
-  while(HAL_GetTick() - startTime <= delayTime){
-  }
-}
-//str len measuring
-size_t strlen(const char *s){
-  const char *p = s;
-  while (*p) ++p;
-  return (size_t)(p - s);
-}
-
-void script_1(void){
-  //scanning for the input from user end
-  //turn on power for both
-  HAL_GPIO_WritePin(GPIOB, MAIN_POWER_1, 1);
-  HAL_GPIO_WritePin(GPIOB, MAIN_POWER_2, 1);
-  //turn on the unlock IRQ on the PD0 pin for interrupt unlock
-  unlockAuth = 1;
-  //take in the sensor info and turn on lcd for display
-  float volume = distanceCm();
-  float weight = volume*0.9;
-  //init lcd and displace the number
-  HAL_Delay(500);
-  lcd_init();
-  lcd_goto_XY(5, 0);
-  lcd_send_string("ECO OIL");
-  HAL_Delay(50);
-  sprintf(displayData,"TT:{%.1f}L-{%.1f}KG",volume,weight);
-  lcd_goto_XY(2, 1);
-  lcd_send_string(displayData);
-  HAL_Delay(500);
-  delay_ms(8000);
-  //turn off lcd power to save power
-  HAL_GPIO_WritePin(GPIOB, MAIN_POWER_1, 0);
-  //disable the IRQ for unlocking and assign it to the IRQ function to run the lcd and the sensor again
-  unlockAuth = 0;   //allow for unlock authorization for unaware trigger, DELETE IF DON'T NEED
-}
-
-//unlocking function, only triggered by the unlock IRQ sequenced
-void unlocking(void){
-  //scan to see if user still press the button
-  HAL_GPIO_WritePin(GPIOB, MAIN_POWER_1, 1);
-  HAL_GPIO_WritePin(GPIOB, MAIN_POWER_2, 1);
-  lcd_init();
-  lcd_clear_display();
-  //button stuck scanning
-  //end of button stuck handle 
-  HAL_Delay(50);
-  buzzer(500);
-  lcd_send_string("HOLD FOR UNLOCK!");
-  //scan for button pressing period
-  uint16_t startTime = HAL_GetTick();
-  while (!HAL_GPIO_ReadPin(GPIOB, 2) && (HAL_GetTick() - startTime <=4000)){
-    //3 second of holding the button for unlocking the device
-    if(HAL_GetTick() - startTime >= 3000){
-      //unlocking sequence
-      lcd_clear_display();
-      HAL_Delay(50);
-      lcd_send_string("WAITING FOR UNLOCK");
-      lcd_goto_XY(0, 1);
-      lcd_send_string("STOP PRESSING");
-      buzzer(500);
-      //turn on SIMCom power 
-      HAL_GPIO_WritePin(GPIOB, MAIN_POWER_2, 1);
-      for (uint8_t i; i < 5; i++) {
-        HAL_Delay(1);
-        buzzer(300);
-      }
-      uint8_t conf = SIMCom_Get();    //start HTTP GET
-      switch (conf) {
-        case 0:   //http success
-          lcd_clear_display();
-          lcd_send_string("UNLOCKING...");
-          //turn off the SIMCom
-          HAL_GPIO_WritePin(GPIOB, MAIN_POWER_2, 0);
-          HAL_Delay(50);
-          buzzer(300);
-          HAL_Delay(300);
-          buzzer(300);
-          latchOpen();
-          machineOpened = 1;
-          lcd_clear_display();
-          break;
-        case 1:   //HANDSHAKE Fail
-          lcd_clear_display();
-          lcd_send_string("HAND SHAKE FAIL!");
-          HAL_Delay(300);
-          buzzer(300);
-          HAL_Delay(300);
-          buzzer(300);
-          HAL_Delay(300);
-          buzzer(300);
-          break;
-        case 5:   //server not available or not auth for unlock yet
-          lcd_clear_display();
-          lcd_send_string("SERVER NOT AUTH!");
-          HAL_Delay(300);
-          buzzer(300);
-          HAL_Delay(300);
-          buzzer(300);
-          HAL_Delay(300);
-          buzzer(300);
-          break;
-        case 3:   //attempting http fail
-          lcd_clear_display();
-          lcd_send_string("ATTEMPTING HTTP FAIL!");
-          HAL_Delay(300);
-          buzzer(300);
-          HAL_Delay(300);
-          buzzer(300);
-          HAL_Delay(300);
-          buzzer(300);
-          break;
-        case 4:   //AT Command Fail
-          lcd_clear_display();
-          lcd_send_string("AT COMMAND FAIL!");
-          HAL_Delay(300);
-          buzzer(300);
-          HAL_Delay(300);
-          buzzer(300);
-          HAL_Delay(300);
-          buzzer(300);
-          break;
-      }
-    }
-  }
-}
-
-//IRQ Handle
-void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin){
-  //scan for EXTI input pins
-  //Lower priority 1
-  if(GPIO_Pin == GPIO_PIN_7){
-    //script1 interrupt
-    delay_ms(50);   //debounce for 50ms for multiple pressing
-    if(!HAL_GPIO_ReadPin(GPIOA, 7)&&(unlockAuth == 0)){
-      unlockAuth = 2;
-      script_1();
-    }
-  }
-  //GPIO_PIN_0 Have higher priority 0
-  if(GPIO_Pin ==  GPIO_PIN_2){}
-    //unlocking interupt
-    delay_ms(50);   //debounce for 50ms for mutiple pressing
-    if(!HAL_GPIO_ReadPin(GPIOB, 2)&&(unlockAuth == 1)){
-      unlockAuth = 2;
-      unlocking();
-    }
-}
+//set alarm
 /* USER CODE END 0 */
 
 /**
@@ -247,6 +98,7 @@ int main(void)
 {
 
   /* USER CODE BEGIN 1 */
+
   /* USER CODE END 1 */
 
   /* MCU Configuration--------------------------------------------------------*/
@@ -255,63 +107,191 @@ int main(void)
   HAL_Init();
 
   /* USER CODE BEGIN Init */
+
   /* USER CODE END Init */
 
   /* Configure the system clock */
   SystemClock_Config();
 
   /* USER CODE BEGIN SysInit */
+
   /* USER CODE END SysInit */
 
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
-  MX_USART1_UART_Init();
-  MX_I2C1_Init();
   MX_ADC1_Init();
+  MX_I2C1_Init();
   MX_RTC_Init();
   MX_TIM1_Init();
+  MX_TIM2_Init();
+  MX_USART1_UART_Init();
   /* USER CODE BEGIN 2 */
-  //turn of the two power fr begin, do not init before the HAL_Init()
-  HAL_GPIO_WritePin(GPIOB, MAIN_POWER_1, 0);
-  HAL_GPIO_WritePin(GPIOB, MAIN_POWER_2, 0);
-  //running script 1
-  script_1();
-  //running SIMCom function post if only the device is not open - machineOpened = 0
-  if(!machineOpened){
-    buzzer(300);
-    delay_ms(4000);
-    uint8_t conf = SIMCom_post(distanceCm(), batteryCap());
-    if (conf) buzzer(500);
+  
+  //////reset the alarm
+  // the init alarm is 0h0m0s
+  //if hours more than 12h and minutes more than 1 then reset back
+  RTC_TimeTypeDef time = {0U, 0U, 0U};
+  HAL_RTC_GetTime(&hrtc, &time, RTC_FORMAT_BIN);  //get the time
+  if(time.Hours >=12U && time.Minutes >= 1U){
+    time.Hours = 0;
+    time.Minutes = 0;
+    time.Seconds = 0;
+    //reset the time
+    HAL_RTC_SetTime(&hrtc, &time, RTC_FORMAT_BIN);
   }
-  //turn off all the power
-  HAL_GPIO_WritePin(GPIOB, MAIN_POWER_1, 0);
-  HAL_GPIO_WritePin(GPIOB, MAIN_POWER_2, 0);
+  //set alarm for half a day
+  RTC_AlarmTypeDef alarm = {{12U, 0U, 0U}, RTC_ALARM_A};
+  HAL_RTC_SetAlarm(&hrtc, &alarm, RTC_FORMAT_BIN);
+  
+  //turn off all the power source at init
+  HAL_GPIO_WritePin(GPIOA, MAIN_POWER_1, 0U);
+  HAL_GPIO_WritePin(GPIOA, MAIN_POWER_2, 0U);
+  //first initial run of button pressing
+  if(HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_0) == 1U){
+    SCRIPT_FLAG = 1U;    //running lcd and sensor
+    SIM_FLAG = 0U;       //diable SIMCom function
+  }
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
   while (1)
   {
+    if(SCRIPT_FLAG == 0U){
+      HAL_GPIO_WritePin(GPIOA, MAIN_POWER_1, 0U);
+      HAL_GPIO_WritePin(GPIOA, MAIN_POWER_2, 0U);
+    }
+    //script1 runner, non blocking
+    if(SCRIPT_FLAG == 1U){
+      //init timer
+      count = 0;    //reset the counter
+      HAL_TIM_Base_Start_IT(&htim2);
+      //turn on power for all device
+      HAL_GPIO_WritePin(GPIOA, MAIN_POWER_1, 1U);
+      HAL_GPIO_WritePin(GPIOA, MAIN_POWER_2, 1U);
+      //lcd init took 300ms so take it as buzzer time
+      HAL_GPIO_WritePin(GPIOA, GPIO_PIN_7, 1U);
+      lcd_init();
+      HAL_GPIO_WritePin(GPIOA, GPIO_PIN_7, 0U);
+      //calculate oil height
+      volume = distanceCm();
+      float weight = volume*0.9;
+      //setting up data
+      sprintf(displayData,"TT:{%.1f}L-{%.1f}KG",volume,weight);
+      lcd_clear_display();
+      lcd_goto_XY(2, 1);
+      lcd_send_string(displayData);
+      //alow unlocking function
+      UNLOCK_AUTHORIZE = 1;
+      //reset script flag
+      SCRIPT_FLAG = 2;
+    }
+    //unlock function blocking mode, don't want anything to interrupt it
+    if(UNLOCK_AUTHORIZE){
+      //do some thing for unlocking like scanning the button input
+      if(HAL_GPIO_ReadPin(GPIOB, BUTTON_INPUT) == 1U && UNLOCK_AUTHORIZE){
+        //do some things
+        HAL_GPIO_WritePin(GPIOA, MAIN_POWER_1, 1U);
+        HAL_GPIO_WritePin(GPIOA, MAIN_POWER_2, 1U);
+        lcd_clear_display();
+        lcd_send_string("HOLD FOR UNLOCK!");
+        uint16_t startTime = HAL_GetTick();
+        uint8_t conf = 0;
+        //press and hold scanning
+        while(HAL_GPIO_ReadPin(GPIOB, BUTTON_INPUT) && HAL_GetTick() - startTime <= 4000){
+          if(HAL_GetTick() - startTime >= 3000){
+            conf = 1;
+          }
+        }
+        //unlock sequence
+        if(conf){
+          //unlocking sequence
+          lcd_clear_display();
+          HAL_Delay(50);
+          lcd_send_string("WAITING FOR UNLOCK");
+          lcd_goto_XY(0, 1);
+          lcd_send_string("STOP PRESSING");
+          buzzer(500);
+          for (uint8_t i; i < 5; i++){
+            HAL_Delay(1);
+            buzzer(300);
+          }
+          conf = SIMCom_Get();
+          switch (conf) {
+            case 0:   //http success
+              lcd_clear_display();
+              lcd_send_string("UNLOCKING...");
+              //turn off the SIMCom
+              HAL_GPIO_WritePin(GPIOB, MAIN_POWER_2, 0);
+              HAL_Delay(50);
+              buzzer(300);
+              HAL_Delay(300);
+              buzzer(300);
+              latchOpen();
+              UNLOCK = 1U;
+              lcd_clear_display();
+              break;
+            case 1:   //HANDSHAKE Fail
+              lcd_clear_display();
+              lcd_send_string("HAND SHAKE FAIL!");
+              HAL_Delay(300);
+              buzzer(300);
+              HAL_Delay(300);
+              buzzer(300);
+              HAL_Delay(300);
+              buzzer(300);
+              break;
+            case 5:   //server not available or not auth for unlock yet
+              lcd_clear_display();
+              lcd_send_string("SERVER NOT AUTH!");
+              HAL_Delay(300);
+              buzzer(300);
+              HAL_Delay(300);
+              buzzer(300);
+              HAL_Delay(300);
+              buzzer(300);
+              break;
+            case 3:   //attempting http fail
+              lcd_clear_display();
+              lcd_send_string("ATTEMPTING HTTP FAIL!");
+              HAL_Delay(300);
+              buzzer(300);
+              HAL_Delay(300);
+              buzzer(300);
+              HAL_Delay(300);
+              buzzer(300);
+              break;
+            case 4:   //AT Command Fail
+              lcd_clear_display();
+              lcd_send_string("AT COMMAND FAIL!");
+              HAL_Delay(300);
+              buzzer(300);
+              HAL_Delay(300);
+              buzzer(300);
+              HAL_Delay(300);
+              buzzer(300);
+              break;
+          }
+        }
+      }
+      HAL_GPIO_WritePin(GPIOA, MAIN_POWER_1, 0U);
+      HAL_GPIO_WritePin(GPIOA, MAIN_POWER_2, 0U);
+    }
+    //SIM Com handle
+    if(SIM_FLAG == 1U){
+      if(UNLOCK == 0U){
+        SIMCom_post(volume, batteryCap());
+        SIM_FLAG = 0U;
+      }
+      if(UNLOCK == 1U){
+        SIM_FLAG = 0U;
+        UNLOCK = 0U;
+      }
+    }
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
   }
-  //setting alarm before going to sleep
-  RTC_TimeTypeDef time = {0U, 0U, 0U};
-  HAL_RTC_GetTime(&hrtc, &time, RTC_FORMAT_BIN);
-  if (time.Hours >= 12 ){
-    time.Hours = 0;
-    time.Minutes = 0;
-    time.Seconds = 0;
-    HAL_RTC_SetTime(&hrtc, &time, RTC_FORMAT_BIN);    //set the initial time for the clock
-    RTC_AlarmTypeDef alarm = {{12U, 0U, 0U}, RTC_ALARM_A};    //Half a day alarm
-    HAL_RTC_SetAlarm(&hrtc, &alarm, RTC_FORMAT_BIN);
-  }
-
-  //enable wake up pin and then go to sleep
-  __HAL_PWR_CLEAR_FLAG(PWR_FLAG_WU);                      //clear the wakeUp flag, allow for multiple wake up enable
-  HAL_PWR_EnableWakeUpPin(PWR_WAKEUP_PIN1);   //Enable the wakeUp pin input - high signal
-  HAL_PWR_EnterSTANDBYMode();                             //enter the stanby mode
   /* USER CODE END 3 */
 }
 
@@ -328,11 +308,11 @@ void SystemClock_Config(void)
   /** Initializes the RCC Oscillators according to the specified parameters
   * in the RCC_OscInitTypeDef structure.
   */
-  RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSE|RCC_OSCILLATORTYPE_LSE;
+  RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_LSI|RCC_OSCILLATORTYPE_HSE;
   RCC_OscInitStruct.HSEState = RCC_HSE_ON;
   RCC_OscInitStruct.HSEPredivValue = RCC_HSE_PREDIV_DIV1;
-  RCC_OscInitStruct.LSEState = RCC_LSE_ON;
   RCC_OscInitStruct.HSIState = RCC_HSI_ON;
+  RCC_OscInitStruct.LSIState = RCC_LSI_ON;
   RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
   RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSE;
   RCC_OscInitStruct.PLL.PLLMUL = RCC_PLL_MUL9;
@@ -355,7 +335,7 @@ void SystemClock_Config(void)
     Error_Handler();
   }
   PeriphClkInit.PeriphClockSelection = RCC_PERIPHCLK_RTC|RCC_PERIPHCLK_ADC;
-  PeriphClkInit.RTCClockSelection = RCC_RTCCLKSOURCE_LSE;
+  PeriphClkInit.RTCClockSelection = RCC_RTCCLKSOURCE_LSI;
   PeriphClkInit.AdcClockSelection = RCC_ADCPCLK2_DIV6;
   if (HAL_RCCEx_PeriphCLKConfig(&PeriphClkInit) != HAL_OK)
   {
@@ -549,6 +529,51 @@ static void MX_TIM1_Init(void)
 }
 
 /**
+  * @brief TIM2 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_TIM2_Init(void)
+{
+
+  /* USER CODE BEGIN TIM2_Init 0 */
+
+  /* USER CODE END TIM2_Init 0 */
+
+  TIM_ClockConfigTypeDef sClockSourceConfig = {0};
+  TIM_MasterConfigTypeDef sMasterConfig = {0};
+
+  /* USER CODE BEGIN TIM2_Init 1 */
+
+  /* USER CODE END TIM2_Init 1 */
+  htim2.Instance = TIM2;
+  htim2.Init.Prescaler = 9999;
+  htim2.Init.CounterMode = TIM_COUNTERMODE_UP;
+  htim2.Init.Period = 7199;
+  htim2.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
+  htim2.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
+  if (HAL_TIM_Base_Init(&htim2) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sClockSourceConfig.ClockSource = TIM_CLOCKSOURCE_INTERNAL;
+  if (HAL_TIM_ConfigClockSource(&htim2, &sClockSourceConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
+  sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
+  if (HAL_TIMEx_MasterConfigSynchronization(&htim2, &sMasterConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN TIM2_Init 2 */
+
+  /* USER CODE END TIM2_Init 2 */
+
+}
+
+/**
   * @brief USART1 Initialization Function
   * @param None
   * @retval None
@@ -600,48 +625,49 @@ static void MX_GPIO_Init(void)
   __HAL_RCC_GPIOB_CLK_ENABLE();
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_0|GPIO_PIN_1|GPIO_PIN_3|GPIO_PIN_4
-                          |GPIO_PIN_9, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(GPIOA, GPIO_PIN_4|GPIO_PIN_5|GPIO_PIN_7, GPIO_PIN_RESET);
+
+  /*Configure GPIO pin Output Level */
+  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_1|GPIO_PIN_9, GPIO_PIN_RESET);
 
   /*Configure GPIO pin : PC13 */
   GPIO_InitStruct.Pin = GPIO_PIN_13;
   GPIO_InitStruct.Mode = GPIO_MODE_ANALOG;
   HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
 
-  /*Configure GPIO pins : PA2 PA3 PA4 PA5
-                           PA6 PA8 PA11 PA12
-                           PA15 */
-  GPIO_InitStruct.Pin = GPIO_PIN_2|GPIO_PIN_3|GPIO_PIN_4|GPIO_PIN_5
-                          |GPIO_PIN_6|GPIO_PIN_8|GPIO_PIN_11|GPIO_PIN_12
-                          |GPIO_PIN_15;
+  /*Configure GPIO pins : PA2 PA3 PA6 PA8
+                           PA11 PA12 PA15 */
+  GPIO_InitStruct.Pin = GPIO_PIN_2|GPIO_PIN_3|GPIO_PIN_6|GPIO_PIN_8
+                          |GPIO_PIN_11|GPIO_PIN_12|GPIO_PIN_15;
   GPIO_InitStruct.Mode = GPIO_MODE_ANALOG;
   HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
-  /*Configure GPIO pin : PA7 */
-  GPIO_InitStruct.Pin = GPIO_PIN_7;
-  GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING;
+  /*Configure GPIO pins : PA4 PA5 PA7 */
+  GPIO_InitStruct.Pin = GPIO_PIN_4|GPIO_PIN_5|GPIO_PIN_7;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
-  /*Configure GPIO pins : PB0 PB1 PB3 PB4
-                           PB9 */
-  GPIO_InitStruct.Pin = GPIO_PIN_0|GPIO_PIN_1|GPIO_PIN_3|GPIO_PIN_4
-                          |GPIO_PIN_9;
+  /*Configure GPIO pin : PB0 */
+  GPIO_InitStruct.Pin = GPIO_PIN_0;
+  GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING;
+  GPIO_InitStruct.Pull = GPIO_PULLDOWN;
+  HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
+
+  /*Configure GPIO pins : PB1 PB9 */
+  GPIO_InitStruct.Pin = GPIO_PIN_1|GPIO_PIN_9;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
 
-  /*Configure GPIO pin : PB2 */
-  GPIO_InitStruct.Pin = GPIO_PIN_2;
-  GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
-  HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
-
-  /*Configure GPIO pins : PB10 PB11 PB12 PB13
-                           PB14 PB15 PB5 */
-  GPIO_InitStruct.Pin = GPIO_PIN_10|GPIO_PIN_11|GPIO_PIN_12|GPIO_PIN_13
-                          |GPIO_PIN_14|GPIO_PIN_15|GPIO_PIN_5;
+  /*Configure GPIO pins : PB2 PB10 PB11 PB12
+                           PB13 PB14 PB15 PB3
+                           PB4 PB5 */
+  GPIO_InitStruct.Pin = GPIO_PIN_2|GPIO_PIN_10|GPIO_PIN_11|GPIO_PIN_12
+                          |GPIO_PIN_13|GPIO_PIN_14|GPIO_PIN_15|GPIO_PIN_3
+                          |GPIO_PIN_4|GPIO_PIN_5;
   GPIO_InitStruct.Mode = GPIO_MODE_ANALOG;
   HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
 
@@ -652,20 +678,34 @@ static void MX_GPIO_Init(void)
   HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
 
   /* EXTI interrupt init*/
-  HAL_NVIC_SetPriority(EXTI2_IRQn, 1, 0);
-  HAL_NVIC_EnableIRQ(EXTI2_IRQn);
-
-  HAL_NVIC_SetPriority(EXTI9_5_IRQn, 2, 0);
-  HAL_NVIC_EnableIRQ(EXTI9_5_IRQn);
+  HAL_NVIC_SetPriority(EXTI0_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(EXTI0_IRQn);
 
   /* USER CODE BEGIN MX_GPIO_Init_2 */
-  NVIC_SetPriority(RTC_IRQn, 0);
-  NVIC_EnableIRQ(RTC_IRQn);
+
   /* USER CODE END MX_GPIO_Init_2 */
 }
 
 /* USER CODE BEGIN 4 */
+//IRQ handle
+void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin){
+  if (GPIO_Pin == GPIO_PIN_0 && SCRIPT_FLAG == 0U) {
+    SCRIPT_FLAG = 1U;    //running lcd and sensor
+    SIM_FLAG = 0U;       //diable SIMCom function
+  }
 
+}
+//timer handle, ten second counting and then stop
+void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim){
+  count++;
+  if (count==10U){        //10 second flag trigger
+    SCRIPT_FLAG = 0U;      //enable for re-trigger
+    SIM_FLAG = 1U;         //allow for SIMCom  running
+    UNLOCK_AUTHORIZE = 0U; //turn off unlock trigger flag
+    count = 0U;            //reset counter
+    HAL_TIM_Base_Stop(&htim2);    //turn off TIM2 to save resource
+  }
+}
 /* USER CODE END 4 */
 
 /**

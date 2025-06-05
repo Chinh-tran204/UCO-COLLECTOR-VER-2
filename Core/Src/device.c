@@ -11,16 +11,20 @@
 //define the needed constant
 #define SEN_TRIGGER 9
 #define SEN_ECHO 8 
-#define BUZZER 0
-#define LATCH 1
-#define BATTERY 1
-#define MAIN_POWER_1 3
-#define MAIN_POWER_2 4
+#define BUZZER GPIO_PIN_7
+#define LATCH GPIO_PIN_1
+#define BATTERY GPIO_PIN_1
+#define MAIN_POWER_1 GPIO_PIN_5
+#define MAIN_POWER_2 GPIO_PIN_4
 
 //Hardware timer init - from main
 extern TIM_HandleTypeDef htim1;
 extern ADC_HandleTypeDef hadc1;
 
+
+float rounding(float num) {
+    return (float)((int)(num * 10.0f + 0.5f)) / 10.0f;
+}
 
 //delay mili-second
 void delay_ms(uint32_t delayTime){
@@ -43,19 +47,19 @@ float batteryCap(void){
     HAL_ADC_PollForConversion(&hadc1, 200);
     ADC_level = HAL_ADC_GetValue(&hadc1);
     float voltage = ((float)ADC_level/4095.0)*3.3;
-    return voltage;
+    return rounding(voltage);
 }
 //latch open function
 void latchOpen(void){
-    HAL_GPIO_WritePin(GPIOB, LATCH, 1);
-    HAL_Delay(3000);    //3 second open
-    HAL_GPIO_WritePin(GPIOB, LATCH, 0);
+    HAL_GPIO_WritePin(GPIOB, LATCH, 1U);
+    delay_ms(3000);    //3 second open
+    HAL_GPIO_WritePin(GPIOB, LATCH, 0U);
 }
 //buzzer function 
 void buzzer(uint16_t time){
-    HAL_GPIO_WritePin(GPIOB, BUZZER, 1);
+    HAL_GPIO_WritePin(GPIOA, BUZZER, 1U);
     delay_ms(time);     //time rign base one user
-    HAL_GPIO_WritePin(GPIOB, BUZZER, 0);
+    HAL_GPIO_WritePin(GPIOA, BUZZER, 0U);
 }
 //ultra sensor checking
 float distanceCm(void){
@@ -65,8 +69,7 @@ float distanceCm(void){
     uint16_t signalOn;
     uint16_t signalOff;
     uint16_t pulseDuration;
-    for (uint8_t i=0; i<5; i++) {
-        HAL_Delay(60);  //buffer time, wait for sensor to finish
+    for (uint8_t i=0; i<3; i++) {
         //sending trigger signal
         HAL_GPIO_WritePin(GPIOB, SEN_TRIGGER, 0);
         delay_us(20);
@@ -100,5 +103,5 @@ float distanceCm(void){
         }
     }
     if (count == 0) return 0;
-    return sumUp/count;
+    return rounding(sumUp/count);
 }

@@ -7,6 +7,7 @@
 #include "stm32f1xx_hal_uart.h"
 
 extern UART_HandleTypeDef huart1;
+extern uint8_t SIM_FLAG;
 
 //ERROR CODE
 #define SUCCESS 0
@@ -15,6 +16,7 @@ extern UART_HandleTypeDef huart1;
 #define ERR_HTTP_FAIL 3
 #define ERR_AT_COMMAND 4
 #define ERR_NOT_AUTH 5
+#define BREAK_POINT 6
 #define BUFFER_TIME 100
 #define HTTP_ACTION_TIME 5000
 
@@ -27,7 +29,7 @@ static uint8_t rxData[500];
 //cutom delay
 void delay_ms(uint32_t delayTime){
   uint32_t startTime = HAL_GetTick();
-  while((HAL_GetTick() - startTime <= delayTime) && !receiving){}
+  while((HAL_GetTick() - startTime <= delayTime) && !receiving && SIM_FLAG){}
 }
 
 //str len measuring
@@ -88,23 +90,28 @@ uint8_t SIMCom_post(float vol, float bat){
   //config SSL
   Transmit("AT+CSSLCFG=\"enableSNI\",0,1\r");
   delay_ms(BUFFER_TIME);
+  if(!SIM_FLAG) return BREAK_POINT;
   if(!strstr((char *)response, "OK") || !receiving) return ERR_AT_COMMAND;
   //init HTTP Service
   Transmit("AT+HTTPINIT\r");
   delay_ms(BUFFER_TIME);
   if(!strstr((char *)response,"OK") || !receiving) return ERR_AT_COMMAND;
+  if(!SIM_FLAG) return BREAK_POINT;
   //setting url
   Transmit("AT+HTTPPARA=\"URL\",\"https://api.admin.bi-oil.app/vinschool-machine/\"\r");
   delay_ms(BUFFER_TIME);
   if(!strstr((char *)response, "OK") || !receiving) return ERR_AT_COMMAND;
+  if(!SIM_FLAG) return BREAK_POINT;
   //setting content type application/json
   Transmit("AT+HTTPPARA=\"CONTENT\",\"application/json\"\r");
   delay_ms(BUFFER_TIME);
   if(!strstr((char *)response, "OK") || !receiving) return ERR_AT_COMMAND;
+  if(!SIM_FLAG) return BREAK_POINT;
   //sending auth code
   Transmit("AT+HTTPPARA=\"USERDATA\",\"Authorization: Basic\"\r");  //need to change to the real auth
   delay_ms(BUFFER_TIME);
   if(!strstr((char *)response, "OK") || !receiving) return ERR_AT_COMMAND;
+  if(!SIM_FLAG) return BREAK_POINT;
   //trying http post
   while (trials <= 3){
     uint16_t len = strlen(data);
@@ -113,17 +120,21 @@ uint8_t SIMCom_post(float vol, float bat){
     Transmit(buffer);
     delay_ms(BUFFER_TIME);
     if(!strstr((char *)response, "DOWNLOAD") || !receiving) return ERR_HTTP_FAIL;
+    if(!SIM_FLAG) return BREAK_POINT;
     //transmit data
     Transmit(data);
     delay_ms(HTTP_ACTION_TIME); //4 seconds delay_mss time for SIMCom running
     if(!strstr((char *)response, "OK ") || !receiving) return ERR_HTTP_FAIL;
+    if(!SIM_FLAG) return BREAK_POINT;
     //start http post
     Transmit("AT+HTTPACTION=1\r");
     delay_ms(HTTP_ACTION_TIME);
     if(!strstr((char *)response, "OK") || !receiving) return ERR_HTTP_FAIL;
+    if(!SIM_FLAG) return BREAK_POINT;
     //reading the msg 
     Transmit("AT+HTTPREAD=0,300\r");
     delay_ms(HTTP_ACTION_TIME);
+    if(!SIM_FLAG) return BREAK_POINT;
     //scan for the appropriate msg
     if(strstr((char *)response, "{\"success\":true}")){
       Transmit("AT+HTTPTERM\r");
