@@ -1,11 +1,11 @@
 # ninja log v5
-501	739	1745896618926986605	cmake/stm32cubemx/CMakeFiles/STM32_Drivers.dir/__/__/Drivers/STM32F1xx_HAL_Driver/Src/stm32f1xx_hal_pwr.c.obj	6deac3f759de3416
-828	918	1745896619106172712	collector_v2.elf	11376c795a3b2db9
 3	533	1745896618716616079	CMakeFiles/collector_v2.dir/Core/Src/main.c.obj	d8642af69db61113
-7	730	1747019022615754407	build.ninja	449c274a2ae89d49
-13	21	0	clean	e10f0d5ab82c95c4
+828	918	1745896619106172712	collector_v2.elf	11376c795a3b2db9
+501	739	1745896618926986605	cmake/stm32cubemx/CMakeFiles/STM32_Drivers.dir/__/__/Drivers/STM32F1xx_HAL_Driver/Src/stm32f1xx_hal_pwr.c.obj	6deac3f759de3416
 6	478	1745896618668128098	cmake/stm32cubemx/CMakeFiles/STM32_Drivers.dir/__/__/Core/Src/system_stm32f1xx.c.obj	d3475591595518d2
 10	527	1745896618715803830	cmake/stm32cubemx/CMakeFiles/STM32_Drivers.dir/__/__/Drivers/STM32F1xx_HAL_Driver/Src/stm32f1xx_hal_gpio.c.obj	d1376360f66b3bee
+13	21	0	clean	e10f0d5ab82c95c4
+7	730	1749087337885008681	build.ninja	449c274a2ae89d49
 9	503	1745896618692345026	cmake/stm32cubemx/CMakeFiles/STM32_Drivers.dir/__/__/Drivers/STM32F1xx_HAL_Driver/Src/stm32f1xx_hal_rcc_ex.c.obj	4462de8137aff189
 8	534	1745896618721060740	cmake/stm32cubemx/CMakeFiles/STM32_Drivers.dir/__/__/Drivers/STM32F1xx_HAL_Driver/Src/stm32f1xx_hal_rcc.c.obj	fb67e234abca5262
 527	753	1745896618944007417	cmake/stm32cubemx/CMakeFiles/STM32_Drivers.dir/__/__/Drivers/STM32F1xx_HAL_Driver/Src/stm32f1xx_hal_exti.c.obj	97bda813abf625a4
