@@ -1,0 +1,2 @@
+../Core/Src/RTC.c:13:9:Set_RTC	16	static
+../Core/Src/RTC.c:21:9:Set_Alarm	40	static

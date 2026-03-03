@@ -1,0 +1,4 @@
+../Core/Src/UI.c:81:13:lang_selector	16	static
+../Core/Src/UI.c:99:6:UI_16XX	32	static
+../Core/Src/UI.c:158:6:UI_12864	24	static
+../Core/Src/UI.c:222:6:UI_clear	8	static

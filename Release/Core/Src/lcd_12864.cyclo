@@ -1,0 +1,4 @@
+../Core/Src/lcd_12864.c:15:9:u8g2_gpio_and_delay	3
+../Core/Src/lcd_12864.c:32:9:u8x8_spi	4
+../Core/Src/lcd_12864.c:58:6:Init_12864	1
+../Core/Src/lcd_12864.c:70:6:lcd_logo_12864	1

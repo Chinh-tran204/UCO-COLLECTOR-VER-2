@@ -1,0 +1,7 @@
+../Core/Src/SIMCOM.c:72:6:Transmit	16	static
+../Core/Src/SIMCOM.c:83:7:SIMCom_HandShake	8	static
+../Core/Src/SIMCOM.c:91:6:SIM_CheckResponse	16	static
+../Core/Src/SIMCOM.c:235:14:SIMCom_Post	80	static
+../Core/Src/SIMCOM.c:308:14:SIMCom_Get	24	static
+../Core/Src/SIMCOM.c:367:14:SIM_Sleep	24	static
+../Core/Src/SIMCOM.c:406:14:SIM_Wakeup	24	static
